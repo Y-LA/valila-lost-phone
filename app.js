@@ -4,7 +4,7 @@
 
 const STORE = 'https://valila.net/ar/%D8%AB%D9%84%D8%A7%D8%AB%D8%A9-%D8%B9%D9%84%D9%8A-%D9%83%D9%8A%D9%81%D9%83/c302175962';
 const STORE_LABEL = 'valila.net';
-const IMG = 'assets/img/', BOT = 'assets/bottles/';
+const IMG = 'assets/img/', BOT = 'assets/bottles/', SND = 'assets/audio/';
 const OWNER = 'يوسف';
 
 /* ---------- helpers ---------- */
@@ -183,7 +183,7 @@ const CHATS = [
       {p:'fahad', at:'14:20', img:'campaign_noname.jpg', cap:'وهذي صورة الإعلان الأولى، وش رأيكم؟'},
       {p:'nawaf', at:'14:22', t:'وتابي وتمارا؟ نبي نكتب «قسّطها»'},
       {me:1, at:'14:23', t:'شغالة ✅ ثلاث عطور وتقسطها على ٤ دفعات'},
-      {p:'fahad', at:'14:30', voice:'0:09'},
+      {p:'fahad', at:'14:30', voice:'0:03', src:'fahad.mp3'},
       {p:'sara', at:'14:30', t:'فهد اكتب، ما نقدر نسمع بالدوام 😂'},
       {p:'fahad', at:'14:31', t:'أقول: الإعلان جاهز، ننتظر بس موافقة المدير'},
       {p:'reem', at:'14:32', t:'يوسف كلمته؟'},
@@ -418,6 +418,7 @@ function push(view, first){
   view.after && view.after(v);
 }
 function pop(){
+  stopClips();
   if (stack.length <= 1) return closeApp();
   const top = stack.pop();
   top.node.classList.add('pop');
@@ -428,6 +429,7 @@ function pop(){
 }
 function closeApp(){
   if (!current) return;
+  stopClips();
   appwin.querySelectorAll('video').forEach(v => v.pause());
   appwin.classList.remove('on'); appwin.setAttribute('aria-hidden', 'true');
   home.classList.remove('behind');
@@ -439,6 +441,9 @@ function closeApp(){
 indicator.addEventListener('click', () => { if (viewer.classList.contains('on')) closeViewer(); else if (!unlocked) unlock(); else closeApp(); });
 function backBtn(label){ const b = el(`<button class="back">${I.back}<span>${label}</span></button>`); b.addEventListener('click', pop); return b; }
 function view(cls, html){ return el(`<div class="view ${cls}">${html}</div>`); }
+
+const activeClips = [];
+function stopClips(){ activeClips.splice(0).forEach(c => { try { c.pause(); } catch(e){} }); }
 
 /* ---------- viewer (photos / video) ---------- */
 function openViewer({src, video, title = '', cta}){
@@ -519,7 +524,7 @@ function chatView(c){
       bcls = 'img' + (m.cap ? ' cap-on' : '');
       inner = `${who ? `<div style="padding:3px 6px 4px">${who}</div>` : ''}<img src="${IMG}${m.img}" alt="" data-full="${IMG}${m.img}">${m.cap ? `<div class="cap">${esc(m.cap)}${meta}</div>` : meta}`;
     } else if (m.voice){
-      inner = `${who}<div class="voice"><button class="play">${I.play}</button><div class="wave">${Array.from({length:30},(_, i)=>`<i style="height:${6 + Math.abs(Math.sin(i * 1.7) * 18) + (i % 4) * 2}px"></i>`).join('')}</div><div class="vav" style="background:${P[m.p] ? P[m.p].color : '#6a7175'};color:#0b141a">${(P[m.p] ? P[m.p].name : 'ف')[0]}</div></div><div class="voice-time">${ar(m.voice)}${meta}</div>`;
+      inner = `${who}<div class="voice" data-src="${m.src}"><button class="play">${I.play}</button><div class="wave">${Array.from({length:30},(_, i)=>`<i style="height:${6 + Math.abs(Math.sin(i * 1.7) * 18) + (i % 4) * 2}px"></i>`).join('')}</div><div class="vav" style="background:${P[m.p] ? P[m.p].color : '#6a7175'};color:#0b141a">${(P[m.p] ? P[m.p].name : 'ف')[0]}</div></div><div class="voice-time"><span class="vt" data-len="${m.voice}">${ar(m.voice)}</span>${meta}</div>`;
     } else if (m.sticker){
       bcls = 'sticker'; inner = m.sticker;
     } else if (m.link){
@@ -534,20 +539,24 @@ function chatView(c){
   body.querySelectorAll('img[data-full]').forEach(img => img.addEventListener('click', () => openViewer({src:img.dataset.full, title:c.short, cta:true})));
   body.querySelectorAll('.voice').forEach(vc => {
     const btn = vc.querySelector('.play'), bars = [...vc.querySelectorAll('.wave i')];
-    const total = 9;
-    let timer = null, stopAudio = null;
-    const stop = () => { clearInterval(timer); timer = null; stopAudio && stopAudio(); stopAudio = null; btn.innerHTML = I.play; bars.forEach(b => b.classList.remove('on')); };
+    const tl = vc.parentElement.querySelector('.voice-time .vt');
+    const total = tl ? tl.dataset.len : '';
+    const clip = new Audio(SND + vc.dataset.src); clip.preload = 'auto';
+    let raf = null;
+    const paint = () => {
+      const p = clip.duration ? clip.currentTime / clip.duration : 0;
+      bars.forEach((b, i) => b.classList.toggle('on', i / bars.length < p));
+      if (tl){ const left = Math.max(0, Math.ceil((clip.duration || 0) - clip.currentTime)); tl.textContent = ar(`0:${String(left).padStart(2, '0')}`); }
+      raf = clip.paused ? null : requestAnimationFrame(paint);
+    };
+    const reset = () => { cancelAnimationFrame(raf); raf = null; btn.innerHTML = I.play; bars.forEach(b => b.classList.remove('on')); if (tl) tl.textContent = ar(total); };
+    clip.addEventListener('ended', () => { clip.currentTime = 0; reset(); });
     btn.addEventListener('click', () => {
-      if (timer) return stop();
+      if (!clip.paused){ clip.pause(); cancelAnimationFrame(raf); btn.innerHTML = I.play; return; }
       btn.innerHTML = I.pause;
-      stopAudio = playGarbled(total);
-      const t0 = Date.now();
-      timer = setInterval(() => {
-        const p = (Date.now() - t0) / (total * 1000);
-        bars.forEach((b, i) => b.classList.toggle('on', i / bars.length <= p));
-        if (p >= 1) stop();
-      }, 100);
+      clip.play().then(() => { raf = requestAnimationFrame(paint); }).catch(reset);
     });
+    activeClips.push(clip);
   });
   return {node:v, dark:false, after:() => {
     const go = () => { body.scrollTop = body.scrollHeight; };
@@ -933,47 +942,6 @@ function startRingtone(){
   return () => { stopped = true; out.gain.setTargetAtTime(0, a.currentTime, .05); setTimeout(() => out.disconnect(), 400); };
 }
 
-/* voice note: muffled, unclear speech under static (you can tell someone is talking, not what) */
-function playGarbled(dur){
-  const a = audio(); if (!a) return () => {};
-  const t0 = a.currentTime + .03, end = t0 + dur;
-  const master = a.createGain(); master.gain.value = .55; master.connect(a.destination);
-  // static hiss
-  const nb = a.createBuffer(1, a.sampleRate * 2, a.sampleRate), d = nb.getChannelData(0);
-  for (let i = 0; i < d.length; i++) d[i] = (Math.random() * 2 - 1) * (Math.random() < .002 ? 3 : 1);
-  const hiss = a.createBufferSource(); hiss.buffer = nb; hiss.loop = true;
-  const hissF = a.createBiquadFilter(); hissF.type = 'bandpass'; hissF.frequency.value = 2400; hissF.Q.value = .5;
-  const hissG = a.createGain(); hissG.gain.value = .07;
-  hiss.connect(hissF); hissF.connect(hissG); hissG.connect(master);
-  // voice: buzzy source through two formants, gated into syllables, then muffled
-  const vo = a.createOscillator(); vo.type = 'sawtooth'; vo.frequency.value = 125;
-  const syl = a.createGain(); syl.gain.value = 0;
-  const f1 = a.createBiquadFilter(); f1.type = 'bandpass'; f1.Q.value = 4;
-  const f2 = a.createBiquadFilter(); f2.type = 'bandpass'; f2.Q.value = 5;
-  const muffle = a.createBiquadFilter(); muffle.type = 'lowpass'; muffle.frequency.value = 1300;
-  const vg = a.createGain(); vg.gain.value = .9;
-  vo.connect(syl); syl.connect(f1); syl.connect(f2); f1.connect(muffle); f2.connect(muffle); muffle.connect(vg); vg.connect(master);
-  // breathy noise in the voice band too
-  const vn = a.createBufferSource(); vn.buffer = nb; vn.loop = true;
-  const vnG = a.createGain(); vnG.gain.value = .25; vn.connect(vnG); vnG.connect(syl);
-  let t = t0;
-  while (t < end - .2){
-    const len = .07 + Math.random() * .2, pause = Math.random() < .12 ? .25 + Math.random() * .35 : .02 + Math.random() * .08;
-    const pk = .5 + Math.random() * .5;
-    syl.gain.setValueAtTime(0, t); syl.gain.linearRampToValueAtTime(pk, t + .025); syl.gain.setValueAtTime(pk * .8, t + len * .7); syl.gain.linearRampToValueAtTime(0, t + len);
-    vo.frequency.setTargetAtTime(105 + Math.random() * 60, t, .05);
-    f1.frequency.setTargetAtTime(350 + Math.random() * 500, t, .03);
-    f2.frequency.setTargetAtTime(1000 + Math.random() * 1200, t, .03);
-    // dropouts like a weak line
-    if (Math.random() < .08) { vg.gain.setValueAtTime(.15, t); vg.gain.setValueAtTime(.9, t + len); }
-    t += len + pause;
-  }
-  [hiss, vo, vn].forEach(n => { n.start(t0); n.stop(end + .05); });
-  master.gain.setValueAtTime(.55, end - .08); master.gain.linearRampToValueAtTime(0, end);
-  let done = false;
-  return () => { if (done) return; done = true; master.gain.setTargetAtTime(0, a.currentTime, .02); setTimeout(() => { try { [hiss, vo, vn].forEach(n => n.stop()); } catch(e){} master.disconnect(); }, 120); };
-}
-
 /* ---------- incoming call ---------- */
 const CALLG = {"mute": "<svg viewBox=\"0 0 24 24\"><path d=\"M9 4.5a3 3 0 0 1 6 0v6a3 3 0 0 1-6 0zM5.5 10.5a6.5 6.5 0 0 0 13 0M12 17v3.5\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\"/><path d=\"M4 3l16 18\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\"/></svg>", "keypad": "<svg viewBox=\"0 0 24 24\" fill=\"#fff\"><circle cx=\"6\" cy=\"4.5\" r=\"1.9\"/><circle cx=\"12\" cy=\"4.5\" r=\"1.9\"/><circle cx=\"18\" cy=\"4.5\" r=\"1.9\"/><circle cx=\"6\" cy=\"9.5\" r=\"1.9\"/><circle cx=\"12\" cy=\"9.5\" r=\"1.9\"/><circle cx=\"18\" cy=\"9.5\" r=\"1.9\"/><circle cx=\"6\" cy=\"14.5\" r=\"1.9\"/><circle cx=\"12\" cy=\"14.5\" r=\"1.9\"/><circle cx=\"18\" cy=\"14.5\" r=\"1.9\"/><circle cx=\"12\" cy=\"19.5\" r=\"1.9\"/></svg>", "speaker": "<svg viewBox=\"0 0 24 24\"><path d=\"M3.5 9h4l5-4.5v15l-5-4.5h-4z\" fill=\"#fff\"/><path d=\"M15.5 9a4.2 4.2 0 0 1 0 6M18 6.5a8 8 0 0 1 0 11\" fill=\"none\" stroke=\"#fff\" stroke-width=\"1.8\" stroke-linecap=\"round\"/></svg>", "add": "<svg viewBox=\"0 0 24 24\"><path d=\"M12 4v16M4 12h16\" stroke=\"#fff\" stroke-width=\"2.2\" stroke-linecap=\"round\"/></svg>", "facetime": "<svg viewBox=\"0 0 24 24\"><rect x=\"2.5\" y=\"6.5\" width=\"13\" height=\"11\" rx=\"3\" fill=\"#fff\"/><path d=\"M16.5 10.5l5-3v9l-5-3z\" fill=\"#fff\"/></svg>", "contacts": "<svg viewBox=\"0 0 24 24\"><circle cx=\"12\" cy=\"8.5\" r=\"4\" fill=\"#fff\"/><path d=\"M4 20.5c.8-4.2 4-6.5 8-6.5s7.2 2.3 8 6.5z\" fill=\"#fff\"/></svg>"};
 const CALLER = 'مدير تسويق ڤاليلا';
@@ -1011,16 +979,25 @@ function answered(ov){
     <div class="call-actions one"><div><button class="cbtn decline end" aria-label="إنهاء"><svg viewBox="0 0 24 24"><path d="M3.5 13.5c4.7-4.5 12.3-4.5 17 0l-2.2 2.6-3.3-1.2-.4-2.6a10 10 0 0 0-5.2 0l-.4 2.6-3.3 1.2z" fill="currentColor"/></svg></button>إنهاء</div></div>`;
   const t0c = Date.now(), timer = ov.querySelector('.call-timer'), say = ov.querySelector('.call-say');
   const tick = setInterval(() => { const s = Math.floor((Date.now() - t0c) / 1000); timer.textContent = ar(`${Math.floor(s / 60)}:${String(s % 60).padStart(2, '0')}`); }, 500);
+  /* captions start at the pauses in صوت مدير التسويق.mp3 (0s, 3.1s, 9.7s) */
   const lines = [
-    'ألو؟ هذا جوال يوسف… الحمدلله إن أحد رد 😮‍💨',
-    'جزاك الله خير إنك لقيته',
-    'عشان ترجّع الجوال… افتح المتصفح، كتبت لك كل شي هناك 🙏',
+    [0.0, 'ألو؟ الحمد لله… أخيرًا أحد رد!'],
+    [3.1, 'اسمعني يا الغالي، هذا جوّال واحد من موظفينا، ويبدو إنه ضاع منه.'],
+    [9.7, 'لو سمحت، افتح المتصفح… وبشرح لك كيف تقدر ترجّعه لنا.'],
   ];
-  let li = 0;
-  const speak = () => { if (li >= lines.length) return; say.appendChild(el(`<div class="say-line">${esc(lines[li++])}</div>`)); };
-  const timers = [setTimeout(speak, 1200), setTimeout(speak, 3600), setTimeout(speak, 5800), setTimeout(() => end(true), 9000)];
-  ov.querySelector('.end').addEventListener('click', () => end(li >= 3));
+  let li = 0, timers = [], over = false;
+  const speak = () => { if (li >= lines.length) return; say.appendChild(el(`<div class="say-line">${esc(lines[li++][1])}</div>`)); };
+  const voice = new Audio(SND + 'manager.mp3');
+  const follow = () => { if (over) return; while (li < lines.length && voice.currentTime >= lines[li][0]) speak(); if (!voice.paused) requestAnimationFrame(follow); };
+  voice.addEventListener('ended', () => setTimeout(() => end(true), 700));
+  voice.play().then(() => requestAnimationFrame(follow)).catch(() => {
+    // sound blocked: show the captions on the same timing without audio
+    timers = lines.map(([at]) => setTimeout(speak, 400 + at * 1000)).concat(setTimeout(() => end(true), 15000));
+  });
+  ov.querySelector('.end').addEventListener('click', () => end(li >= lines.length));
   function end(heard){
+    if (over) return; over = true;
+    voice.pause();
     clearInterval(tick); timers.forEach(clearTimeout);
     const secs = Math.max(1, Math.floor((Date.now() - t0c) / 1000));
     CALLS.unshift({n:CALLER, c:1, at:hhmm(), dur:secs});
